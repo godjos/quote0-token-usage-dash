@@ -68,6 +68,33 @@ class KimiUsageParsingTests(unittest.TestCase):
         self.assertEqual(usage.rows[0].label, "7d")
         self.assertEqual(usage.rows[0].used_percent, 30.0)
 
+    def test_includes_summary_when_limits_have_only_short_window(self):
+        payload = {
+            "usage": {
+                "limit": "100",
+                "used": "98",
+                "remaining": "2",
+                "resetTime": "2026-06-02T15:35:17.627331Z",
+            },
+            "limits": [
+                {
+                    "window": {"duration": 300, "timeUnit": "TIME_UNIT_MINUTE"},
+                    "detail": {
+                        "limit": "100",
+                        "remaining": "100",
+                        "resetTime": "2026-06-02T12:35:17.627331Z",
+                    },
+                }
+            ],
+        }
+
+        usage = _parse_kimi_payload(payload)
+
+        self.assertEqual([row.label for row in usage.rows], ["5h", "7d"])
+        self.assertEqual([row.used_percent for row in usage.rows], [0.0, 98.0])
+        self.assertIsNotNone(usage.rows[0].resets_at)
+        self.assertIsNotNone(usage.rows[1].resets_at)
+
 
 class RenderTests(unittest.TestCase):
     def test_renders_two_provider_png(self):

@@ -454,7 +454,7 @@ def _parse_kimi_payload(payload: Mapping[str, Any]) -> UsageProviderResult:
     usage = payload.get("usage")
     if isinstance(usage, Mapping):
         summary = _kimi_row_from_mapping(usage, "7d")
-        if summary and not rows:
+        if summary and not any(row.label == summary.label for row in rows):
             rows.append(summary)
 
     return UsageProviderResult(provider_id="kimi", title="Kimi Code", rows=rows)
