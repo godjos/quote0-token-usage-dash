@@ -1,6 +1,6 @@
 # token-usage-dash
 
-Pushes Claude and OpenAI Codex subscription plan usage to a [dot.mindreset.tech](https://dot.mindreset.tech) e-ink display as a 296×152 image.
+Pushes selected coding-agent subscription usage to a [dot.mindreset.tech](https://dot.mindreset.tech) e-ink display as a 296×152 image.
 
 ![Token usage on e-ink display](docs/preview.jpg)
 
@@ -8,6 +8,9 @@ Pushes Claude and OpenAI Codex subscription plan usage to a [dot.mindreset.tech]
 
 - **Claude** — 5-hour and 7-day utilization (% used, % left, time to reset)
 - **OpenAI Codex** — 5-hour and weekly utilization
+- **Kimi Code** — 5-hour and 7-day usage windows when returned by the Kimi usage API
+
+Configure exactly two rendered providers with `USAGE_PROVIDERS`, for example `claude,openai`, `claude,kimi`, or `openai,kimi`.
 
 ## Setup
 
@@ -29,10 +32,14 @@ Edit `.env` with your credentials:
 |-----|-------------|
 | `QUOTE_API_KEY` | Bearer token from dot.mindreset.tech |
 | `QUOTE_DEVICE_ID` | Device serial number |
-| `OPENAI_ENABLED` | Set to `false` to skip OpenAI fetching (default: `true`) |
+| `USAGE_PROVIDERS` | Exactly two providers to render: `claude`, `openai`, `kimi` (default: `claude,openai`) |
+| `OPENAI_ENABLED` | Legacy option: set to `false` to skip OpenAI only when `USAGE_PROVIDERS` is unset |
 | `UPDATE_INTERVAL` | Seconds between updates in loop mode (default: `1800`) |
 | `CODEX_ACCESS_TOKEN` | Override Codex OAuth token (optional; default: read from `~/.codex/auth.json`) |
 | `CODEX_ACCOUNT_ID` | Override Codex account ID (optional) |
+| `KIMI_CODE_ACCESS_TOKEN` | Override Kimi Code OAuth access token (optional) |
+| `KIMI_API_KEY` | Override Kimi Code API key (optional) |
+| `KIMI_CODE_BASE_URL` | Override Kimi Code base URL (default: `https://api.kimi.com/coding/v1`) |
 
 ### 3. Claude auth
 
@@ -44,7 +51,13 @@ Codex credentials are read automatically from `~/.codex/auth.json` (created when
 
 Alternatively, set `CODEX_ACCESS_TOKEN` in `.env` to supply the token directly.
 
-### 5. Add Image API content in Content Studio
+### 5. Kimi Code auth
+
+Kimi credentials are read automatically from `~/.kimi/credentials/kimi-code.json` after `kimi login`.
+
+Alternatively, set `KIMI_CODE_ACCESS_TOKEN` or `KIMI_API_KEY` in `.env` to supply the token directly.
+
+### 6. Add Image API content in Content Studio
 
 In the dot.mindreset.tech app, add an **Image API** content slot to your device. The script targets this slot.
 
@@ -65,6 +78,7 @@ uv run render.py   # saves to /tmp/usage_preview.png
 
 # Print usage to terminal only
 uv run usage.py
+uv run usage.py --providers claude,kimi
 uv run usage.py --claude-only
 uv run usage.py --openai-only
 ```
@@ -73,6 +87,6 @@ uv run usage.py --openai-only
 
 | File | Purpose |
 |------|---------|
-| `usage.py` | Fetches Claude and OpenAI usage data |
+| `usage.py` | Fetches and normalizes Claude, OpenAI, and Kimi usage data |
 | `render.py` | Renders the 296×152 PNG image |
 | `display.py` | Orchestrates fetch → render → push to device |

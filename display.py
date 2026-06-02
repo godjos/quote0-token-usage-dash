@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Update e-ink display (dot.mindreset.tech) with Claude + OpenAI Codex usage.
+Update e-ink display (dot.mindreset.tech) with selected token usage providers.
 Renders a 296×152 PNG image and pushes via the Image API.
 
 Required .env keys:
@@ -8,6 +8,7 @@ Required .env keys:
   QUOTE_DEVICE_ID   - Device serial number (also accepts DEVICE_ID)
 
 Optional .env keys:
+  USAGE_PROVIDERS=claude,openai  - Exactly two providers to render
   OPENAI_ENABLED=false   - Set to false to skip OpenAI scrape (default: true)
   UPDATE_INTERVAL=1800   - Seconds between updates when running with --loop (default: 1800)
 """
@@ -85,30 +86,39 @@ def push_image(png_bytes: bytes) -> None:
 # Main loop
 # ---------------------------------------------------------------------------
 
+def selected_usage_providers() -> tuple[str, ...]:
+    from usage import parse_usage_providers
+
+    if os.environ.get("USAGE_PROVIDERS", "").strip():
+        return parse_usage_providers()
+    if not OPENAI_ENABLED:
+        return ("claude",)
+    return parse_usage_providers()
+
+
 def run_once(save_preview: bool = False) -> bool:
     """Fetch usage, render image, push to display. Returns True on success."""
-    from usage import get_claude_usage, get_openai_usage
+    from usage import get_provider_usage
     from render import render_image
 
-    claude_usage = None
-    openai_usage = None
+    provider_results = []
 
-    try:
-        claude_usage = get_claude_usage()
-    except Exception as e:
-        print(f"Warning: Claude fetch failed — {e}", file=sys.stderr)
-
-    if OPENAI_ENABLED:
+    for provider in selected_usage_providers():
         try:
-            openai_usage = get_openai_usage()
+            usage = get_provider_usage(provider)
         except Exception as e:
-            print(f"Warning: OpenAI fetch failed — {e}", file=sys.stderr)
+            print(f"Warning: {provider} fetch failed — {e}", file=sys.stderr)
+            continue
+        if usage.rows:
+            provider_results.append(usage)
+        else:
+            print(f"Warning: {provider} returned no usage rows", file=sys.stderr)
 
-    if claude_usage is None and openai_usage is None:
+    if not provider_results:
         print("Error: no usage data, skipping update.", file=sys.stderr)
         return False
 
-    png = render_image(claude_usage, openai_usage)
+    png = render_image(provider_results)
 
     if save_preview:
         preview_path = "/tmp/usage_preview.png"

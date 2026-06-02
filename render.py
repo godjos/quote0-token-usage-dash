@@ -1,5 +1,5 @@
 """
-Render a 296×152 black/white PNG image showing Claude + OpenAI Codex usage.
+Render a 296×152 black/white PNG image showing selected token usage providers.
 
 Uses Terminus bitmap font — pure B&W pixels, no anti-aliasing, no grey.
 No supersampling needed.
@@ -9,12 +9,15 @@ from __future__ import annotations
 
 import io
 from datetime import datetime
-from typing import Optional
+from typing import Optional, TYPE_CHECKING
 from zoneinfo import ZoneInfo
 
 from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFont
+
+if TYPE_CHECKING:
+    from usage import UsageProviderResult
 
 W, H = 296, 152
 PAD  = 6
@@ -108,10 +111,14 @@ def _draw_row(
     _bar(draw, bar_x, bar_y, bar_w, bar_h, used_pct)
 
 
-def render_image(
-    claude_usage: Optional[dict],
-    openai_usage=None,
-) -> bytes:
+def _section_label(usage: "UsageProviderResult") -> str:
+    label = usage.title
+    if usage.subtitle:
+        label += f"  ({usage.subtitle})"
+    return label
+
+
+def render_image(usages: list["UsageProviderResult"]) -> bytes:
     img  = Image.new("L", (W, H), WHITE)
     draw = ImageDraw.Draw(img)
 
@@ -140,76 +147,50 @@ def render_image(
     draw.line([(0, header_bottom), (W, header_bottom)], fill=BLACK, width=1)
 
     # ── Collect rows ──────────────────────────────────────────────────────
-    from display import format_time_until, format_time_until_iso
+    from usage import format_time_until
 
-    claude_rows: list[tuple[str, float, Optional[str]]] = []
-    if claude_usage:
-        for key, lbl in [("five_hour", "5h"), ("seven_day", "7d"),
-                          ("seven_day_sonnet", "7dS"), ("seven_day_opus", "7dO")]:
-            w = claude_usage.get(key)
-            if w:
-                try:
-                    note = format_time_until_iso(w["resets_at"])
-                except Exception:
-                    note = None
-                claude_rows.append((lbl, w["utilization"], note))
-
-    openai_rows: list[tuple[str, float, Optional[str]]] = []
-    if openai_usage:
-        if openai_usage.primary_limit:
-            w = openai_usage.primary_limit
-            openai_rows.append(("5h", w.used_percent,
-                                 format_time_until(w.resets_at) if w.resets_at else None))
-        if openai_usage.secondary_limit:
-            w = openai_usage.secondary_limit
-            openai_rows.append(("Wk", w.used_percent,
-                                 format_time_until(w.resets_at) if w.resets_at else None))
+    sections: list[tuple[str, list[tuple[str, float, Optional[str]]]]] = []
+    for usage in usages[:2]:
+        rows = []
+        for row in usage.rows:
+            note = row.reset_hint
+            if note is None and row.resets_at is not None:
+                note = format_time_until(row.resets_at)
+            rows.append((row.label, row.used_percent, note))
+        if rows:
+            sections.append((_section_label(usage), rows))
 
     # ── Layout ────────────────────────────────────────────────────────────
     SECTION_H = _lsize(fonts["section"]) + 5
     DIVIDER_H = 8
 
-    n_claude = len(claude_rows)
-    n_openai = len(openai_rows)
-    n_rows   = n_claude + n_openai
-    has_both = n_claude > 0 and n_openai > 0
+    n_sections = len(sections)
+    n_rows = sum(len(rows) for _, rows in sections)
+    has_multiple = n_sections > 1
 
     content_h = H - header_bottom - 2
-    fixed_h   = ((1 if n_claude else 0) + (1 if n_openai else 0)) * SECTION_H
-    fixed_h  += DIVIDER_H if has_both else 0
+    fixed_h = n_sections * SECTION_H
+    fixed_h += DIVIDER_H * (n_sections - 1) if has_multiple else 0
     row_h     = min((content_h - fixed_h) // n_rows, 28) if n_rows else content_h
 
     # Vertically center the content block when it doesn't fill the space
     total_h   = fixed_h + row_h * n_rows
     y_offset  = (content_h - total_h) // 2
-    # ── Claude ────────────────────────────────────────────────────────────
     y = header_bottom + 2 + y_offset
-    if claude_rows:
-        draw.text((PAD, y), "Claude", font=fonts["section"], fill=BLACK)
-        y += SECTION_H
-        for label, used_pct, note in claude_rows:
-            _draw_row(draw, y, row_h, label, used_pct, note, fonts)
-            y += row_h
 
-    # ── Dashed divider ────────────────────────────────────────────────────
-    if has_both:
-        y += DIVIDER_H // 2
-        dash, gap, x = 6, 4, 0
-        while x < W:
-            draw.line([(x, y), (min(x + dash - 1, W), y)], fill=BLACK, width=1)
-            x += dash + gap
-        y += DIVIDER_H // 2
-
-    # ── OpenAI ────────────────────────────────────────────────────────────
-    if openai_rows:
-        label = "OpenAI Codex"
-        if openai_usage and openai_usage.credits_remaining is not None:
-            label += f"  ({openai_usage.credits_remaining:.0f} cr)"
+    for idx, (label, rows) in enumerate(sections):
         draw.text((PAD, y), label, font=fonts["section"], fill=BLACK)
         y += SECTION_H
-        for row_label, used_pct, note in openai_rows:
+        for row_label, used_pct, note in rows:
             _draw_row(draw, y, row_h, row_label, used_pct, note, fonts)
             y += row_h
+        if idx < len(sections) - 1:
+            y += DIVIDER_H // 2
+            dash, gap, x = 6, 4, 0
+            while x < W:
+                draw.line([(x, y), (min(x + dash - 1, W), y)], fill=BLACK, width=1)
+                x += dash + gap
+            y += DIVIDER_H // 2
 
     buf = io.BytesIO()
     img.convert("1").save(buf, format="PNG")
@@ -217,19 +198,19 @@ def render_image(
 
 
 if __name__ == "__main__":
-    from usage import get_claude_usage, get_openai_usage
+    from usage import get_provider_usage, parse_usage_providers
 
-    claude, openai = None, None
-    try:
-        claude = get_claude_usage()
-    except Exception as e:
-        print(f"Claude error: {e}")
-    try:
-        openai = get_openai_usage()
-    except Exception as e:
-        print(f"OpenAI error: {e}")
+    results = []
+    for provider in parse_usage_providers():
+        try:
+            usage = get_provider_usage(provider)
+        except Exception as e:
+            print(f"{provider} error: {e}")
+            continue
+        if usage.rows:
+            results.append(usage)
 
-    png = render_image(claude, openai)
+    png = render_image(results)
     with open("/tmp/usage_preview.png", "wb") as f:
         f.write(png)
     print(f"Saved /tmp/usage_preview.png ({len(png)} bytes)")
